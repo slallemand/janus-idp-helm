@@ -1,0 +1,70 @@
+backstage:
+  image:
+    registry: quay.io
+    repository: ablock/backstage-oauth
+    tag: latest
+  extraEnvVars:
+    - name: "APP_CONFIG_app_baseUrl"
+      value: "https://{{ .Values.ingress.host }}"
+    - name: "APP_CONFIG_backend_baseUrl"
+      value: "https://{{ .Values.ingress.host }}"
+    - name: "APP_CONFIG_backend_cors_origin"
+      value: "https://{{ .Values.ingress.host }}"
+  installDir: /opt/app-root/src
+ 
+  extraContainers:
+    - name: oauth-proxy 
+      args:
+        - -provider=openshift
+        - -https-address=:8888
+        - -http-address=
+        - -email-domain=*
+        - -upstream=http://localhost:7007
+        - -tls-cert=/etc/tls/private/tls.crt
+        - -tls-key=/etc/tls/private/tls.key
+        - -cookie-secret="{{ default (randAlpha 32 | lower | b64enc) .Values.oauthProxy.cookieSecret }}"
+        - -openshift-service-account={{ include "common.names.fullname" . }}
+        - -openshift-ca=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        - -skip-auth-regex=^/metrics
+        - -skip-provider-button
+        - -request-logging=true
+      image: registry.redhat.io/openshift4/ose-oauth-proxy:v4.12
+      imagePullPolicy: IfNotPresent
+      ports:
+        - name: oauth-proxy
+          containerPort: 8888    
+          protocol: TCP
+      volumeMounts:
+        - mountPath: /etc/tls/private
+          name: backstage-tls
+ 
+  extraVolumeMounts:
+    - mountPath: /tmp/fakepath
+      name: backstage-tls
+ 
+  extraVolumes:
+    - name: backstage-tls
+      secret:
+        defaultMode: 420
+        secretName: backstage-tls
+ 
+service:
+  annotations:
+    service.alpha.openshift.io/serving-cert-secret-name: backstage-tls
+  ports:
+    backend: 8888
+    targetPort: oauth-proxy
+ 
+serviceAccount:
+  create: true
+  annotations:
+    serviceaccounts.openshift.io/oauth-redirecturi.backstage: "https://{{ .Values.ingress.host }}/oauth/callback"
+ 
+ingress:
+  enabled: true
+  host: backstage.apps.example.com
+  annotations:
+    route.openshift.io/termination: "reencrypt"
+ 
+oauthProxy:
+  cookieSecret: ""
